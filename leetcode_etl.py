@@ -12,6 +12,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from utils import *
+import psycopg2
+
 
 # Initialize Colorama
 colorama.init(autoreset=True)
@@ -25,7 +27,54 @@ options.headless = True
 options.add_argument("--log-level=3")
 driver = webdriver.Chrome(executable_path=CHROMEDRIVER_PATH, options=options)
 
-    
+
+def check_if_valid_data(df: pd.DataFrame) -> bool:
+    if df.empty:
+        print("No Problems downloaded. Finishing execution")
+        return False 
+    # Primary Key Check
+    if pd.Series(df['id']).is_unique:
+        pass
+    else:
+        raise Exception("Primary Key check is violated")
+    # Check for nulls
+    if df.isnull().values.any():
+        raise Exception("Null values found")
+    return True
+
+def create_database():
+        '''Creates and connects to postgres database. Returns cursor and connection to DB'''
+        # connect to default database
+        try:
+            conn = psycopg2.connect("host=localhost dbname=dbname user=user password=password")
+        except psycopg2.Error as e:
+            print("Error: Could not make connection to the Postgres database")
+            print(e)
+        try:
+            cur = conn.cursor()
+        except psycopg2.Error as e:
+            print("Error: Could not get cursor to the Database")
+            print(e)
+        conn.set_session(autocommit=True)
+        cur.execute("DROP DATABASE IF EXISTS leetcodedb")
+        cur.execute("CREATE DATABASE leetcodedb WITH ENCODING 'utf8' TEMPLATE template0")
+
+        # close connection to default database
+        conn.close()    
+
+        # connect to leetcodedb database
+        try:
+            conn = psycopg2.connect("host=localhost dbname=dbname user=user password=password")
+        except psycopg2.Error as e:
+            print("Error: Could not make connection to the Postgres database")
+            print(e)
+        try:
+            cur = conn.cursor()
+        except psycopg2.Error as e:
+            print("Error: Could not get cursor to the Database")
+            print(e)
+
+        return cur, conn
 if __name__ == "__main__":
     ALGORITHMS_ENDPOINT_URL = "https://leetcode.com/api/problems/algorithms/"
 
@@ -65,3 +114,32 @@ if __name__ == "__main__":
     df = pd.DataFrame(dict)
     driver.quit()
     # print(df)
+
+    if check_if_valid_data(df):
+        print("Data valid, proceed to Load stage")
+    
+    cur, conn = create_database()
+    sql_query = """
+    CREATE TABLE IF NOT EXISTS Leetcode(
+        Id INT PRIMARY KEY,
+        Title VARCHAR(200) NOT NULL UNIQUE,
+        URL VARCHAR(200) NOT NULL,
+        Difficulty INT NOT NULL
+    )
+    """
+    cur.execute(sql_query)
+    conn.commit()
+    print("Opened database successfully")
+    Leetcode_problems_insert = ("""INSERT INTO Leetcode(
+                                Id,
+                                Title,
+                                URL,
+                                Difficulty)
+                                VALUES (%s,%s,%s,%s)
+                                """)
+    for i, row in df.iterrows():
+        cur.execute(Leetcode_problems_insert, list(row))
+    #     print(list(row))
+    conn.commit()
+    cur.close()
+    conn.close()
